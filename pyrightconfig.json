@@ -1,0 +1,5 @@
+{
+  "typeCheckingMode": "off",
+  "exclude": ["TEST.py", "node_modules", ".expo", ".git"],
+  "reportMissingImports": false
+}
