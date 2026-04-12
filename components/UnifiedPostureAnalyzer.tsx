@@ -266,6 +266,18 @@ const UnifiedPostureAnalyzer: React.FC<UnifiedPostureAnalyzerProps> = ({
 
     if (hasStartedStandingKegel.current) {
       if (kegelStage.current === "done") {
+        if (!isSpeaking.current) {
+          hasStartedStandingKegel.current = false;
+          kegelStage.current = "idle";
+          standingDetectedSince.current = null;
+          tiptoeStableCount.current = 0;
+          lastTiptoeReminderAt.current = 0;
+          tiptoeCountdownRemaining.current = 0;
+          tiptoeCountdownNextTickAt.current = 0;
+          tiptoeBaselineCaptured.current = false;
+          tiptoeBaselineLeftLift.current = 0;
+          tiptoeBaselineRightLift.current = 0;
+        }
         return;
       }
 
@@ -291,15 +303,19 @@ const UnifiedPostureAnalyzer: React.FC<UnifiedPostureAnalyzerProps> = ({
         lastSpeechTime.current = now;
         lastSpokenFeedback.current = "吸氣";
         kegelStage.current = "tiptoe_detect";
-        nextKegelCueAt.current = now + 1000;
+        nextKegelCueAt.current = now + 300;
         return;
       }
 
       if (kegelStage.current === "tiptoe_detect") {
-        if (!isSpeaking.current && now >= nextKegelCueAt.current && !lastTiptoeReminderAt.current) {
-          speakText("墊腳尖吐氣");
+        if (
+          !isSpeaking.current &&
+          !lastTiptoeReminderAt.current &&
+          now >= nextKegelCueAt.current
+        ) {
+          speakText("吐氣，夾緊臀部並墊起腳尖5秒");
           lastSpeechTime.current = now;
-          lastSpokenFeedback.current = "墊腳尖吐氣";
+          lastSpokenFeedback.current = "吐氣，夾緊臀部並墊起腳尖5秒";
           lastTiptoeReminderAt.current = now;
           return;
         }
@@ -321,24 +337,9 @@ const UnifiedPostureAnalyzer: React.FC<UnifiedPostureAnalyzerProps> = ({
         }
 
         if (tiptoeStableCount.current >= TIPTOE_STABLE_THRESHOLD && !isSpeaking.current) {
-          speakText("有偵測到墊腳尖，開始讀秒五秒");
-          lastSpeechTime.current = now;
-          lastSpokenFeedback.current = "有偵測到墊腳尖，開始讀秒五秒";
           kegelStage.current = "tiptoe_countdown";
           tiptoeCountdownRemaining.current = 5;
-          tiptoeCountdownNextTickAt.current = now + 1000;
-          return;
-        }
-
-        if (
-          !isSpeaking.current &&
-          now - lastTiptoeReminderAt.current > 4000 &&
-          tiptoeStableCount.current === 0
-        ) {
-          speakText("墊腳尖吐氣");
-          lastSpeechTime.current = now;
-          lastSpokenFeedback.current = "墊腳尖吐氣";
-          lastTiptoeReminderAt.current = now;
+          tiptoeCountdownNextTickAt.current = now;
           return;
         }
       }
