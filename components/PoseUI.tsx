@@ -140,18 +140,14 @@ const PoseUI: React.FC<PoseUIProps> = ({
         />
       </View>
 
-      {/* 隱藏的分析組件 - 僅用於語音提示 */}
-      <View style={{ display: "none" }}>
-        {mode === "sitting-only" && (
-          <SittingPostureAnalyzer pose={currentPose} />
-        )}
-        {mode === "unified" && (
-          <UnifiedPostureAnalyzer
-            pose={currentPose}
-            analysisResult={currentAnalysis}
-          />
-        )}
-      </View>
+      {/* 分析組件：不佔畫面，但需保持掛載以觸發語音與彈窗流程 */}
+      {mode === "sitting-only" && <SittingPostureAnalyzer pose={currentPose} />}
+      {mode === "unified" && (
+        <UnifiedPostureAnalyzer
+          pose={currentPose}
+          analysisResult={currentAnalysis}
+        />
+      )}
     </View>
   );
 };
