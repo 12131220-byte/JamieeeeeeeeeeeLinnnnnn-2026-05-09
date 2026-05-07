@@ -1,21 +1,19 @@
-﻿import { Pose, PostureType, UnifiedPostureResult } from "@/types/types";
+﻿import { BodyPartIndex, Pose, PostureType, UnifiedPostureResult } from "@/types/types";
 import { analyzePosture } from "@/utils/pose-analyzer";
 import Constants from "expo-constants";
 import * as Speech from "expo-speech";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
-  Modal,
-  Pressable,
   StyleSheet,
-  Text,
-  TextInput,
   View
 } from "react-native";
+import type { KegelExerciseConfig } from "./KegelExerciseSelector";
 
 interface UnifiedPostureAnalyzerProps {
   pose: Pose | null;
   analysisResult?: UnifiedPostureResult | null;
   onAnalysisComplete?: (result: UnifiedPostureResult) => void;
+  exerciseConfig?: KegelExerciseConfig | null;
 }
 
 type SpeechRecognitionModule = {
@@ -57,10 +55,11 @@ const UnifiedPostureAnalyzer: React.FC<UnifiedPostureAnalyzerProps> = ({
   pose,
   analysisResult,
   onAnalysisComplete,
+  exerciseConfig = null,
 }) => {
   const [result, setResult] = useState<UnifiedPostureResult | null>(null);
   const [showKegelRepPrompt, setShowKegelRepPrompt] = useState<boolean>(false);
-  const [kegelRepInput, setKegelRepInput] = useState<string>("5");
+  const [selectedKegelPosture, setSelectedKegelPosture] = useState<PostureType | null>(null);
   const [speechTranscript, setSpeechTranscript] = useState<string>("");
   const [speechError, setSpeechError] = useState<string>("");
   const [isListeningForKegel, setIsListeningForKegel] = useState<boolean>(false);
@@ -72,14 +71,24 @@ const UnifiedPostureAnalyzer: React.FC<UnifiedPostureAnalyzerProps> = ({
   const isInBufferPeriod = useRef<boolean>(false);
   const newPostureDetectionCount = useRef<number>(0);
   const STABLE_POSTURE_THRESHOLD = 3; // 連續檢測N次相同新姿勢才視為穩定
+  
+  // 站姿凱格爾相關
   const standingDetectedSince = useRef<number | null>(null);
   const hasStartedStandingKegel = useRef<boolean>(false);
+  
+  // 坐姿凱格爾相關
+  const sittingDetectedSince = useRef<number | null>(null);
+  const hasStartedSittingKegel = useRef<boolean>(false);
+  
+  // 共用凱格爾狀態
   const targetKegelRounds = useRef<number>(0);
   const completedKegelRounds = useRef<number>(0);
   const kegelStage = useRef<
-    "idle" | "instruction" | "awaiting_reps" | "tiptoe_detect" | "tiptoe_countdown" | "done"
+    "idle" | "instruction" | "awaiting_reps" | "tiptoe_detect" | "tiptoe_countdown" | "leg_stretch_detect" | "leg_countdown" | "done"
   >("idle");
   const nextKegelCueAt = useRef<number>(0);
+  
+  // 站姿凱格爾 - 腳尖相關
   const tiptoeStableCount = useRef<number>(0);
   const lastTiptoeReminderAt = useRef<number>(0);
   const TIPTOE_STABLE_THRESHOLD = 4;
@@ -90,6 +99,22 @@ const UnifiedPostureAnalyzer: React.FC<UnifiedPostureAnalyzerProps> = ({
   const tiptoeBaselineLeftLift = useRef<number>(0);
   const tiptoeBaselineRightLift = useRef<number>(0);
   const awaitingTiptoeBaselineCapture = useRef<boolean>(false);
+  
+  // 坐姿凱格爾 - 腿部伸直相關
+  const legStretchStableCount = useRef<number>(0);
+  const lastLegStretchReminderAt = useRef<number>(0);
+  const LEG_STRETCH_STABLE_THRESHOLD = 4;
+  const legCountdownRemaining = useRef<number>(0);
+  const legCountdownNextTickAt = useRef<number>(0);
+  const ankleLiftBaseline = useRef<number | null>(null); // 記錄腳踝進入檢測時的基準高度
+  
+  // 坐姿凱格爾 - 夾臀基線與檢測
+  const squeezeHipBaseline = useRef<number | null>(null);
+  const HIP_SQUEEZE_THRESHOLD = 0.03; // 基線減少超過此值視為夾緊臀部
+  const lastGluteReminderAt = useRef<number>(0);
+  const configuredKegelRounds = exerciseConfig?.reps ?? 5;
+  const configuredKegelPosture = exerciseConfig?.type ?? null;
+
   const speechRecognitionListeners = useRef<{
     start?: { remove: () => void };
     end?: { remove: () => void };
@@ -184,10 +209,12 @@ const UnifiedPostureAnalyzer: React.FC<UnifiedPostureAnalyzerProps> = ({
     });
   }, []);
 
-  const commitKegelRoundCount = useCallback(
+  const commitStandingKegelRoundCount = useCallback(
     (rounds: number) => {
       const safeRounds = Math.min(Math.max(rounds, 1), 30);
 
+      hasStartedStandingKegel.current = true;
+      hasStartedSittingKegel.current = false;
       targetKegelRounds.current = safeRounds;
       completedKegelRounds.current = 0;
       tiptoeStableCount.current = 0;
@@ -196,8 +223,8 @@ const UnifiedPostureAnalyzer: React.FC<UnifiedPostureAnalyzerProps> = ({
       tiptoeBaselineLeftLift.current = 0;
       tiptoeBaselineRightLift.current = 0;
       awaitingTiptoeBaselineCapture.current = true;
+      setSelectedKegelPosture(PostureType.STANDING);
 
-      setKegelRepInput(String(safeRounds));
       setShowKegelRepPrompt(false);
       setIsListeningForKegel(false);
       setSpeechError("");
@@ -215,11 +242,67 @@ const UnifiedPostureAnalyzer: React.FC<UnifiedPostureAnalyzerProps> = ({
     [speakText],
   );
 
+  const commitSittingKegelRoundCount = useCallback(
+    (rounds: number) => {
+      const safeRounds = Math.min(Math.max(rounds, 1), 30);
+
+      hasStartedStandingKegel.current = false;
+      hasStartedSittingKegel.current = true;
+      targetKegelRounds.current = safeRounds;
+      completedKegelRounds.current = 0;
+      legStretchStableCount.current = 0;
+      lastLegStretchReminderAt.current = 0;
+
+      setShowKegelRepPrompt(false);
+      setSelectedKegelPosture(PostureType.SITTING);
+      setIsListeningForKegel(false);
+      setSpeechError("");
+      setSpeechTranscript("");
+      kegelStage.current = "leg_stretch_detect";
+
+      const now = Date.now();
+      nextKegelCueAt.current = now + 300;
+
+      if (pose) {
+        const leftAnkle = pose[BodyPartIndex.LEFT_ANKLE];
+        const rightAnkle = pose[BodyPartIndex.RIGHT_ANKLE];
+        if (
+          leftAnkle &&
+          rightAnkle &&
+          leftAnkle.visibility >= 0.5 &&
+          rightAnkle.visibility >= 0.5
+        ) {
+          ankleLiftBaseline.current = (leftAnkle.y + rightAnkle.y) / 2;
+          console.log("[Kegel] captured ankleLiftBaseline=", ankleLiftBaseline.current);
+        } else {
+          ankleLiftBaseline.current = null;
+        }
+      } else {
+        ankleLiftBaseline.current = null;
+      }
+
+      const startMessage = `收到，開始進行${safeRounds}次坐姿凱格爾，現在升直雙腳`;
+      speakText(startMessage);
+      lastSpeechTime.current = now;
+      lastSpokenFeedback.current = startMessage;
+    },
+    [pose, speakText],
+  );
+
+  const commitKegelRoundCount = useCallback(
+    (rounds: number, posture: PostureType) => {
+      if (posture === PostureType.STANDING) {
+        commitStandingKegelRoundCount(rounds);
+      } else if (posture === PostureType.SITTING) {
+        commitSittingKegelRoundCount(rounds);
+      }
+    },
+    [commitStandingKegelRoundCount, commitSittingKegelRoundCount],
+  );
+
   const submitKegelRepInput = useCallback(() => {
-    const parsed = Number.parseInt(kegelRepInput.trim(), 10);
-    const safeRounds = Number.isFinite(parsed) ? parsed : 1;
-    commitKegelRoundCount(safeRounds);
-  }, [commitKegelRoundCount, kegelRepInput]);
+    commitKegelRoundCount(configuredKegelRounds, selectedKegelPosture ?? configuredKegelPosture ?? PostureType.STANDING);
+  }, [commitKegelRoundCount, configuredKegelPosture, configuredKegelRounds, selectedKegelPosture]);
 
   const startListeningForKegelRounds = useCallback(async () => {
     try {
@@ -308,7 +391,13 @@ const UnifiedPostureAnalyzer: React.FC<UnifiedPostureAnalyzerProps> = ({
           return;
         }
 
-        commitKegelRoundCount(extractedRounds);
+        const currentPosture = hasStartedStandingKegel.current
+          ? PostureType.STANDING
+          : hasStartedSittingKegel.current
+          ? PostureType.SITTING
+          : PostureType.UNKNOWN;
+
+        commitKegelRoundCount(extractedRounds, currentPosture);
         speechModule.stop();
       });
 
@@ -384,6 +473,55 @@ const UnifiedPostureAnalyzer: React.FC<UnifiedPostureAnalyzerProps> = ({
     },
     [getHeelLiftFromPose],
   );
+
+  const detectLegStretchFromPose = useCallback(
+    (inputPose: Pose | null): boolean => {
+      if (!inputPose || ankleLiftBaseline.current === null) return false;
+
+      const leftAnkle = inputPose[BodyPartIndex.LEFT_ANKLE];
+      const rightAnkle = inputPose[BodyPartIndex.RIGHT_ANKLE];
+      if (!leftAnkle || !rightAnkle || leftAnkle.visibility < 0.5 || rightAnkle.visibility < 0.5) {
+        return false;
+      }
+
+      // 計算當前腳踝高度（Y值）
+      const avgCurrentAnkleY = (leftAnkle.y + rightAnkle.y) / 2;
+      // 計算腳踝相對於基準的上升量（Y軸變小表示向上）
+      const ankleRiseFromBaseline = ankleLiftBaseline.current - avgCurrentAnkleY;
+      const ANKLE_RISE_THRESHOLD = 0.02; // 腳踝需上升 2% 的屏幕高度
+
+      console.log(
+        "[SittingLegStretch] baseline=",
+        ankleLiftBaseline.current.toFixed(4),
+        "current=",
+        avgCurrentAnkleY.toFixed(4),
+        "rise=",
+        ankleRiseFromBaseline.toFixed(4),
+      );
+
+      return ankleRiseFromBaseline > ANKLE_RISE_THRESHOLD;
+    },
+    [],
+  );
+
+  const detectGluteSqueezeFromPose = useCallback((inputPose: Pose | null): boolean => {
+    if (!inputPose) return false;
+    if (squeezeHipBaseline.current === null) return false;
+
+    const leftHip = inputPose[BodyPartIndex.LEFT_HIP];
+    const rightHip = inputPose[BodyPartIndex.RIGHT_HIP];
+    if (!leftHip || !rightHip || leftHip.visibility < 0.5 || rightHip.visibility < 0.5) {
+      return false;
+    }
+
+    const currentHipDistance = Math.abs(leftHip.x - rightHip.x);
+    const delta = squeezeHipBaseline.current - currentHipDistance;
+
+    // debug log
+    console.log("[GluteDetect] baseline=", squeezeHipBaseline.current, "current=", currentHipDistance, "delta=", delta);
+
+    return delta > HIP_SQUEEZE_THRESHOLD;
+  }, []);
 
   const getFallbackSpeech = useCallback((feedback: string): string => {
     let cleaned = feedback
@@ -486,8 +624,10 @@ const UnifiedPostureAnalyzer: React.FC<UnifiedPostureAnalyzerProps> = ({
 
   const resetKegelSession = useCallback(() => {
     hasStartedStandingKegel.current = false;
+    hasStartedSittingKegel.current = false;
     kegelStage.current = "idle";
     standingDetectedSince.current = null;
+    sittingDetectedSince.current = null;
     targetKegelRounds.current = 0;
     completedKegelRounds.current = 0;
     tiptoeStableCount.current = 0;
@@ -498,13 +638,18 @@ const UnifiedPostureAnalyzer: React.FC<UnifiedPostureAnalyzerProps> = ({
     tiptoeBaselineLeftLift.current = 0;
     tiptoeBaselineRightLift.current = 0;
     awaitingTiptoeBaselineCapture.current = false;
+    legStretchStableCount.current = 0;
+    lastLegStretchReminderAt.current = 0;
+    legCountdownRemaining.current = 0;
+    legCountdownNextTickAt.current = 0;
     setShowKegelRepPrompt(false);
+    setSelectedKegelPosture(null);
     setIsListeningForKegel(false);
     setSpeechTranscript("");
     setSpeechError("");
   }, []);
 
-  const prepareNextTiptoeRound = useCallback((now: number) => {
+  const prepareNextStandingTiptoeRound = useCallback((now: number) => {
     kegelStage.current = "tiptoe_detect";
     nextKegelCueAt.current = now + 1200;
     tiptoeStableCount.current = 0;
@@ -514,6 +659,13 @@ const UnifiedPostureAnalyzer: React.FC<UnifiedPostureAnalyzerProps> = ({
     tiptoeBaselineRightLift.current = 0;
     awaitingTiptoeBaselineCapture.current = true;
   }, []);
+
+  const prepareNextSittingLegRound = useCallback((now: number) => {
+    kegelStage.current = "leg_stretch_detect";
+    nextKegelCueAt.current = now + 300;
+    legStretchStableCount.current = 0;
+    lastLegStretchReminderAt.current = 0;
+  }, [pose]);
 
   useEffect(() => {
     return () => {
@@ -534,6 +686,7 @@ const UnifiedPostureAnalyzer: React.FC<UnifiedPostureAnalyzerProps> = ({
 
     const now = Date.now();
     const resolvedAnalysisResult = analysisResult || analyzePosture(pose as Pose);
+
     setResult(resolvedAnalysisResult);
 
     if (onAnalysisComplete) {
@@ -544,58 +697,40 @@ const UnifiedPostureAnalyzer: React.FC<UnifiedPostureAnalyzerProps> = ({
       resolvedAnalysisResult.primaryPosture === PostureType.STANDING &&
       !!resolvedAnalysisResult.detectedPostures.standing?.isStanding;
 
-    if (!hasStartedStandingKegel.current) {
+    const isSittingNow =
+      resolvedAnalysisResult.primaryPosture === PostureType.SITTING &&
+      !!resolvedAnalysisResult.detectedPostures.sitting?.isSitting;
+
+    if (!hasStartedStandingKegel.current && !hasStartedSittingKegel.current) {
       if (isStandingNow) {
         if (standingDetectedSince.current === null) {
           standingDetectedSince.current = now;
         }
 
         if (now - standingDetectedSince.current >= 2000 && !isSpeaking.current) {
-          hasStartedStandingKegel.current = true;
-          kegelStage.current = "instruction";
-          nextKegelCueAt.current = now;
-          tiptoeStableCount.current = 0;
-          lastTiptoeReminderAt.current = 0;
-          tiptoeCountdownRemaining.current = 0;
-          tiptoeCountdownNextTickAt.current = 0;
-          tiptoeBaselineCaptured.current = false;
-          tiptoeBaselineLeftLift.current = 0;
-          tiptoeBaselineRightLift.current = 0;
-          awaitingTiptoeBaselineCapture.current = true;
+          commitStandingKegelRoundCount(configuredKegelRounds);
+          return;
+        }
+      } else if (isSittingNow) {
+        if (sittingDetectedSince.current === null) {
+          sittingDetectedSince.current = now;
+        }
+
+        if (now - sittingDetectedSince.current >= 2000 && !isSpeaking.current) {
+          commitSittingKegelRoundCount(configuredKegelRounds);
+          return;
         }
       } else {
         standingDetectedSince.current = null;
+        sittingDetectedSince.current = null;
       }
     }
 
     if (hasStartedStandingKegel.current) {
-      if (!isStandingNow && !isSpeaking.current) {
-        resetKegelSession();
-        return;
-      }
-
       if (kegelStage.current === "done") {
         if (!isSpeaking.current) {
           resetKegelSession();
         }
-        return;
-      }
-
-      if (
-        kegelStage.current === "instruction" &&
-        !isSpeaking.current &&
-        now >= nextKegelCueAt.current
-      ) {
-        const instruction = "已偵測到站姿，現在開始站姿凱格爾運動，請先站穩，雙腳與肩同寬，手可扶牆保持平衡。請在畫面輸入要做幾次，再按開始。";
-        speakText(instruction);
-        lastSpeechTime.current = now;
-        lastSpokenFeedback.current = instruction;
-        kegelStage.current = "awaiting_reps";
-        setShowKegelRepPrompt(true);
-        return;
-      }
-
-      if (kegelStage.current === "awaiting_reps") {
         return;
       }
 
@@ -673,11 +808,86 @@ const UnifiedPostureAnalyzer: React.FC<UnifiedPostureAnalyzerProps> = ({
             lastSpeechTime.current = now;
             lastSpokenFeedback.current = nextRoundCue;
 
-            prepareNextTiptoeRound(now);
+            prepareNextStandingTiptoeRound(now);
             return;
           }
 
           const finishCue = "全部完成，今天的站姿凱格爾結束";
+          speakText(finishCue);
+          lastSpeechTime.current = now;
+          lastSpokenFeedback.current = finishCue;
+          kegelStage.current = "done";
+          return;
+        }
+      }
+
+      return;
+    }
+
+    if (hasStartedSittingKegel.current) {
+      if (kegelStage.current === "done") {
+        if (!isSpeaking.current) {
+          resetKegelSession();
+        }
+        return;
+      }
+
+      if (kegelStage.current === "leg_stretch_detect") {
+        if (
+          !isSpeaking.current &&
+          now >= nextKegelCueAt.current &&
+          !lastLegStretchReminderAt.current
+        ) {
+          const stretchPrompt = "現在升直雙腳";
+          speakText(stretchPrompt);
+          lastSpeechTime.current = now;
+          lastSpokenFeedback.current = stretchPrompt;
+          lastLegStretchReminderAt.current = now;
+          kegelStage.current = "leg_stretch_detect";
+          return;
+        }
+
+        const isLegStretched = detectLegStretchFromPose(pose);
+
+        // 一旦偵測到雙腳升直（膝蓋以下往上抬），立即開始 5 秒倒數
+        if (isLegStretched && !isSpeaking.current) {
+          kegelStage.current = "leg_countdown";
+          legCountdownRemaining.current = 5;
+          legCountdownNextTickAt.current = now;
+          return;
+        }
+      }
+
+      if (kegelStage.current === "leg_countdown") {
+        if (
+          legCountdownRemaining.current > 0 &&
+          !isSpeaking.current &&
+          now >= legCountdownNextTickAt.current
+        ) {
+          const seconds = legCountdownRemaining.current;
+          speakText(seconds.toString());
+          lastSpeechTime.current = now;
+          lastSpokenFeedback.current = seconds.toString();
+          legCountdownRemaining.current -= 1;
+          legCountdownNextTickAt.current = now + 1000;
+          return;
+        }
+
+        if (legCountdownRemaining.current === 0 && !isSpeaking.current) {
+          completedKegelRounds.current += 1;
+          const remaining = targetKegelRounds.current - completedKegelRounds.current;
+
+          if (remaining > 0) {
+            const nextRoundCue = `本次完成，還有${remaining}次`;
+            speakText(nextRoundCue);
+            lastSpeechTime.current = now;
+            lastSpokenFeedback.current = nextRoundCue;
+
+            prepareNextSittingLegRound(now);
+            return;
+          }
+
+          const finishCue = "全部完成，今天的坐姿凱格爾結束";
           speakText(finishCue);
           lastSpeechTime.current = now;
           lastSpokenFeedback.current = finishCue;
@@ -740,58 +950,15 @@ const UnifiedPostureAnalyzer: React.FC<UnifiedPostureAnalyzerProps> = ({
     getFeedbackForSpeech,
     speakText,
     detectTiptoeFromPose,
+    detectLegStretchFromPose,
     getHeelLiftFromPose,
     resetKegelSession,
+    prepareNextStandingTiptoeRound,
+    prepareNextSittingLegRound,
+    showKegelRepPrompt,
   ]);
 
-  return (
-    <View>
-      <Modal transparent visible={showKegelRepPrompt} animationType="fade">
-        <View style={styles.modalBackdrop}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>站姿凱格爾設定</Text>
-            <Text style={styles.modalHint}>請輸入這次要做的次數（1-30），或直接按聽取後說出「5次」、「我要做十二次」</Text>
-            <View style={styles.quickRow}>
-              {[5, 10, 15].map((count) => (
-                <Pressable
-                  key={count}
-                  style={styles.quickButton}
-                  onPress={() => commitKegelRoundCount(count)}
-                >
-                  <Text style={styles.quickButtonText}>{count}次</Text>
-                </Pressable>
-              ))}
-            </View>
-            <Pressable
-              style={[
-                styles.voiceButton,
-                isListeningForKegel ? styles.voiceButtonActive : null,
-              ]}
-              onPress={isListeningForKegel ? stopListeningForKegelRounds : startListeningForKegelRounds}
-            >
-              <Text style={styles.voiceButtonText}>
-                {isListeningForKegel ? "停止聽取" : "開始聽取"}
-              </Text>
-            </Pressable>
-            {!!speechTranscript && <Text style={styles.transcriptText}>聽到：{speechTranscript}</Text>}
-            {!!speechError && <Text style={styles.errorText}>{speechError}</Text>}
-            <TextInput
-              style={styles.modalInput}
-              value={kegelRepInput}
-              onChangeText={setKegelRepInput}
-              keyboardType="number-pad"
-              maxLength={2}
-              placeholder="例如 5"
-              placeholderTextColor="#7A7A7A"
-            />
-            <Pressable style={styles.modalButton} onPress={submitKegelRepInput}>
-              <Text style={styles.modalButtonText}>開始</Text>
-            </Pressable>
-          </View>
-        </View>
-      </Modal>
-    </View>
-  );
+  return <View />;
 };
 
 const styles = StyleSheet.create({
@@ -824,6 +991,35 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: 8,
     marginBottom: 12,
+  },
+  typeRow: {
+    flexDirection: "row",
+    gap: 10,
+    marginBottom: 12,
+  },
+  typeButton: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: "#D6DCE5",
+    borderRadius: 14,
+    paddingVertical: 14,
+    paddingHorizontal: 12,
+    backgroundColor: "#F8FAFC",
+    gap: 6,
+  },
+  typeButtonActive: {
+    borderColor: "#0F766E",
+    backgroundColor: "#E6FFFB",
+  },
+  typeButtonTitle: {
+    color: "#0F172A",
+    fontSize: 16,
+    fontWeight: "700",
+  },
+  typeButtonSubtitle: {
+    color: "#475569",
+    fontSize: 12,
+    fontWeight: "500",
   },
   quickButton: {
     flex: 1,
@@ -880,8 +1076,29 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     alignItems: "center",
   },
+  modalButtonDisabled: {
+    backgroundColor: "#94A3B8",
+  },
   modalButtonText: {
     color: "#FFFFFF",
+    fontSize: 16,
+    fontWeight: "700",
+  },
+  modalActionsRow: {
+    flexDirection: "row",
+    gap: 10,
+  },
+  secondaryButton: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: "#C9D1D9",
+    borderRadius: 10,
+    paddingVertical: 12,
+    alignItems: "center",
+    backgroundColor: "#F8FAFC",
+  },
+  secondaryButtonText: {
+    color: "#0F172A",
     fontSize: 16,
     fontWeight: "700",
   },

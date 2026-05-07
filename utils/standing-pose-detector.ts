@@ -108,11 +108,22 @@ export function detectStandingPosture(pose: Pose): StandingPostureResult {
     需要比例: `> ${MIN_VERTICAL_BODY_RATIO} (已放寬)`,
   });
 
+  // 坐姿很容易同時滿足「膝蓋在臀部下」與「腳踝在膝蓋下」，
+  // 因此站姿需要再加上膝蓋接近伸直的條件，避免把坐姿誤判成站姿。
+  const kneesExtendedEnough =
+    Math.abs(avgKneeAngleForDetection - 180) <= MAX_KNEE_FLEXION_DEVIATION;
+  if (!kneesExtendedEnough) {
+    result.postureFeedback.push(
+      `膝蓋彎曲較大（${avgKneeAngleForDetection.toFixed(1)}°），較像坐姿而不是站姿`,
+    );
+  }
+
   // 站姿判定 (改為更寬鬆的條件以提高檢測率)
   const isStandingRelationship =
     bodyVertical &&
     shoulderToHipDistance > MIN_SHOULDER_TO_HIP_DISTANCE &&
-    hipToAnkleDistance > shoulderToHipDistance * MIN_VERTICAL_BODY_RATIO;
+    hipToAnkleDistance > shoulderToHipDistance * MIN_VERTICAL_BODY_RATIO &&
+    kneesExtendedEnough;
 
   if (!isStandingRelationship) {
     result.postureFeedback.push("未檢測到站姿，請站起來或調整相機角度");

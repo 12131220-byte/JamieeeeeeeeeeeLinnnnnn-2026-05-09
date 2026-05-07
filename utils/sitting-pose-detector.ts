@@ -91,11 +91,22 @@ export function detectSittingPosture(pose: Pose): SittingPostureResult {
   const hipToShoulderDistance = Math.abs(shoulderY - avgHipY);
 
   // 坐姿判定：臀部在膝蓋上方，且臀部到膝蓋的距離合理
+  // 即使膝蓋角度較大，只要臀部在膝蓋上方就視為坐姿
   const isSittingRelationship =
     hipAboveKnee &&
     hipToKneeDistance > 0 &&
-    hipToKneeDistance < hipToShoulderDistance * 1.5 &&
-    avgKneeAngleForDetection < 150;
+    hipToKneeDistance < hipToShoulderDistance * 1.5;
+  // 移除嚴格的膝蓋角度限制，改以身體部位空間關係判定
+
+  // 詳細的坐姿檢測診斷日誌
+  console.log("🔍 [坐姿檢測診斷]", {
+    臀部在膝蓋上: hipAboveKnee,
+    臀到膝距離: hipToKneeDistance.toFixed(4),
+    臀到肩距離: hipToShoulderDistance.toFixed(4),
+    距離比例: (hipToKneeDistance / hipToShoulderDistance).toFixed(3),
+    膝蓋角度: avgKneeAngleForDetection.toFixed(1),
+    坐姿判定: isSittingRelationship ? "✓ 是坐姿" : "✗ 非坐姿",
+  });
 
   if (!isSittingRelationship) {
     result.postureFeedback.push("未檢測到坐姿，請坐在椅子上");
@@ -213,4 +224,50 @@ export function getPostureSummary(result: SittingPostureResult): string {
   } else {
     return "坐姿需要改進 ⚠";
   }
+}
+
+/**
+ * 檢測坐姿時雙腳是否升直（抬起並伸直雙腿）
+ * 條件：1) 腳踝位置高於臀部（Y坐標更小）
+ *       2) 膝蓋角度 > 150 度（腿伸直）
+ */
+export function detectLegStretchInSittingPose(pose: Pose): boolean {
+  const leftHip = pose[BodyPartIndex.LEFT_HIP] as KeyPoint | undefined;
+  const rightHip = pose[BodyPartIndex.RIGHT_HIP] as KeyPoint | undefined;
+  const leftKnee = pose[BodyPartIndex.LEFT_KNEE] as KeyPoint | undefined;
+  const rightKnee = pose[BodyPartIndex.RIGHT_KNEE] as KeyPoint | undefined;
+  const leftAnkle = pose[BodyPartIndex.LEFT_ANKLE] as KeyPoint | undefined;
+  const rightAnkle = pose[BodyPartIndex.RIGHT_ANKLE] as KeyPoint | undefined;
+
+  if (!leftHip || !rightHip || !leftKnee || !rightKnee || !leftAnkle || !rightAnkle) {
+    return false;
+  }
+
+  if (
+    leftHip.visibility < 0.5 ||
+    rightHip.visibility < 0.5 ||
+    leftKnee.visibility < 0.5 ||
+    rightKnee.visibility < 0.5 ||
+    leftAnkle.visibility < 0.5 ||
+    rightAnkle.visibility < 0.5
+  ) {
+    return false;
+  }
+
+  // 計算平均臀部和腳踝高度
+  const avgHipY = (leftHip.y + rightHip.y) / 2;
+  const avgAnkleY = (leftAnkle.y + rightAnkle.y) / 2;
+
+  // 計算膝蓋角度以確認雙腿是否伸直
+  const leftKneeAngle = calculateAngle(leftHip, leftKnee, leftAnkle);
+  const rightKneeAngle = calculateAngle(rightHip, rightKnee, rightAnkle);
+
+  const ANKLE_LIFT_THRESHOLD = 0.03;
+  const KNEE_ANGLE_THRESHOLD = 150; // 角度大於此值視為伸直
+  const ankleLift = avgHipY - avgAnkleY; // 正值表示腳踝高於臀部
+
+  // debug log
+  console.log("[SittingLegStretch] ankleLift=", ankleLift.toFixed(4), "leftKnee=", leftKneeAngle.toFixed(1), "rightKnee=", rightKneeAngle.toFixed(1));
+
+  return ankleLift > ANKLE_LIFT_THRESHOLD && leftKneeAngle > KNEE_ANGLE_THRESHOLD && rightKneeAngle > KNEE_ANGLE_THRESHOLD;
 }
