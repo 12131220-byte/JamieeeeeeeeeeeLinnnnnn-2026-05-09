@@ -4,7 +4,7 @@ import {
     Pose,
     StandingPostureResult,
 } from "@/types/types";
-import { arePointsVisible, calculateAngle } from "./geometry";
+import { calculateAngle } from "./geometry";
 
 /**
  * 站姿檢測和分析模塊
@@ -55,7 +55,7 @@ export function detectStandingPosture(pose: Pose): StandingPostureResult {
     },
   };
 
-  // 檢查關鍵點可見度 (降低阈值到 0.3 以提高检测灵敏度)
+  // 檢查關鍵點可見度：允許側面視角，只要至少一側腿鏈完整就可以判定
   const essentialPoints = [
     leftShoulder,
     rightShoulder,
@@ -67,7 +67,8 @@ export function detectStandingPosture(pose: Pose): StandingPostureResult {
     rightAnkle,
   ];
 
-  if (!arePointsVisible(essentialPoints, 0.3)) {
+  const visibleCount = essentialPoints.filter((point) => point && point.visibility >= 0.2).length;
+  if (visibleCount < 5) {
     result.postureFeedback.push(
       "無法檢測到足夠的身體部位，請確保整個身體在鏡頭範圍內",
     );
@@ -75,12 +76,29 @@ export function detectStandingPosture(pose: Pose): StandingPostureResult {
   }
 
   // 計算平均位置
-  const avgShoulderY = ((leftShoulder?.y || 0) + (rightShoulder?.y || 0)) / 2;
-  const avgShoulderX = ((leftShoulder?.x || 0) + (rightShoulder?.x || 0)) / 2;
-  const avgHipY = ((leftHip?.y || 0) + (rightHip?.y || 0)) / 2;
-  const avgHipX = ((leftHip?.x || 0) + (rightHip?.x || 0)) / 2;
-  const avgKneeY = ((leftKnee?.y || 0) + (rightKnee?.y || 0)) / 2;
-  const avgAnkleY = ((leftAnkle?.y || 0) + (rightAnkle?.y || 0)) / 2;
+  const leftChainVisible =
+    !!leftHip && !!leftKnee && !!leftAnkle &&
+    leftHip.visibility >= 0.2 && leftKnee.visibility >= 0.2 && leftAnkle.visibility >= 0.2;
+  const rightChainVisible =
+    !!rightHip && !!rightKnee && !!rightAnkle &&
+    rightHip.visibility >= 0.2 && rightKnee.visibility >= 0.2 && rightAnkle.visibility >= 0.2;
+
+  if (!leftChainVisible && !rightChainVisible) {
+    result.postureFeedback.push("請讓其中一側的髖、膝、踝盡量完整入鏡");
+    return result;
+  }
+
+  const avgShoulderY = [leftShoulder, rightShoulder].filter((point) => point && point.visibility >= 0.2).reduce((sum, point) => sum + point.y, 0) / [leftShoulder, rightShoulder].filter((point) => point && point.visibility >= 0.2).length;
+  const avgShoulderX = [leftShoulder, rightShoulder].filter((point) => point && point.visibility >= 0.2).reduce((sum, point) => sum + point.x, 0) / [leftShoulder, rightShoulder].filter((point) => point && point.visibility >= 0.2).length;
+
+  const hipPoints = [leftHip, rightHip].filter((point): point is KeyPoint => !!point && point.visibility >= 0.2);
+  const kneePoints = [leftKnee, rightKnee].filter((point): point is KeyPoint => !!point && point.visibility >= 0.2);
+  const anklePoints = [leftAnkle, rightAnkle].filter((point): point is KeyPoint => !!point && point.visibility >= 0.2);
+
+  const avgHipY = hipPoints.reduce((sum, point) => sum + point.y, 0) / hipPoints.length;
+  const avgHipX = hipPoints.reduce((sum, point) => sum + point.x, 0) / hipPoints.length;
+  const avgKneeY = kneePoints.reduce((sum, point) => sum + point.y, 0) / kneePoints.length;
+  const avgAnkleY = anklePoints.reduce((sum, point) => sum + point.y, 0) / anklePoints.length;
   const shoulderWidth = Math.abs((leftShoulder?.x || 0) - (rightShoulder?.x || 0));
   const hipWidth = Math.abs((leftHip?.x || 0) - (rightHip?.x || 0));
 
@@ -111,12 +129,16 @@ export function detectStandingPosture(pose: Pose): StandingPostureResult {
   // 坐姿很容易同時滿足「膝蓋在臀部下」與「腳踝在膝蓋下」,
   // 因此站姿需要再加上膝蓋接近伸直的條件，避免把坐姿誤判成站姿。
   // 計算膝蓋角度以判定是否伸直
-  let avgKneeAngleForDetection = 180;
-  if (leftKnee && leftHip && leftAnkle && rightKnee && rightHip && rightAnkle) {
-    const leftKneeAngleForDetection = calculateAngle(leftHip, leftKnee, leftAnkle);
-    const rightKneeAngleForDetection = calculateAngle(rightHip, rightKnee, rightAnkle);
-    avgKneeAngleForDetection = (leftKneeAngleForDetection + rightKneeAngleForDetection) / 2;
+  const kneeAnglesForDetection: number[] = [];
+  if (leftChainVisible && leftHip && leftKnee && leftAnkle) {
+    kneeAnglesForDetection.push(calculateAngle(leftHip, leftKnee, leftAnkle));
   }
+  if (rightChainVisible && rightHip && rightKnee && rightAnkle) {
+    kneeAnglesForDetection.push(calculateAngle(rightHip, rightKnee, rightAnkle));
+  }
+
+  const avgKneeAngleForDetection =
+    kneeAnglesForDetection.reduce((sum, angle) => sum + angle, 0) / kneeAnglesForDetection.length;
 
   const kneesExtendedEnough =
     Math.abs(avgKneeAngleForDetection - 180) <= MAX_KNEE_FLEXION_DEVIATION;

@@ -31,6 +31,8 @@ const KegelExerciseSession: React.FC<KegelExerciseSessionProps> = ({
   const [currentRep, setCurrentRep] = useState(1);
   const [timeRemaining, setTimeRemaining] = useState(restBetweenSets);
   const [isPaused, setIsPaused] = useState(false);
+  const [repJustCompleted, setRepJustCompleted] = useState(false);
+  const [nextSetReady, setNextSetReady] = useState(false);
 
   const sessionState = useRef({
     currentSet: 1,
@@ -54,6 +56,8 @@ const KegelExerciseSession: React.FC<KegelExerciseSessionProps> = ({
 
   // 初始化運動
   useEffect(() => {
+    console.log("[Init] Initializing with props - type:", type, "sets:", sets, "reps:", reps, "restBetweenSets:", restBetweenSets);
+    
     if (timerInterval.current) {
       clearInterval(timerInterval.current);
       timerInterval.current = null;
@@ -68,13 +72,17 @@ const KegelExerciseSession: React.FC<KegelExerciseSessionProps> = ({
     setTimeRemaining(restBetweenSets);
     setIsPaused(false);
     setHoldSecondsLeft(0);
+    setRepJustCompleted(false);
+    setNextSetReady(false);
     standingStableFrames.current = 0;
 
     if (type === PostureType.STANDING) {
       // 站姿先等待使用者站好
       setState("setup");
       standingState.current = "awaitingStanding";
-      Speech.speak("請先站好在鏡頭前，偵測到站姿後會自動開始凱格爾運動");
+      Speech.speak(
+        `請先站好在鏡頭前，偵測到站姿後會自動開始凱格爾運動，共${sets}組，每組${reps}次，組間休息${restBetweenSets}秒`,
+      );
     } else {
       setState("exercising");
       standingState.current = "idle";
@@ -83,10 +91,75 @@ const KegelExerciseSession: React.FC<KegelExerciseSessionProps> = ({
     }
   }, [type, sets, reps, restBetweenSets]);
 
-  // 監聽組間休息秒數的變化，同步更新
+  // 監聽 repJustCompleted 來推進組數邏輯（避免陳舊閉包問題）
   useEffect(() => {
-    setTimeRemaining(restBetweenSets);
-  }, [restBetweenSets]);
+    if (!repJustCompleted) return;
+
+    console.log("[RepJustCompleted] Triggered. currentRep:", currentRep, "reps:", reps, "currentSet:", currentSet, "sets:", sets);
+    setRepJustCompleted(false);
+
+    if (currentRep < reps) {
+      // 該組還有下一次重複
+      const nextRep = currentRep + 1;
+      console.log("[RepJustCompleted] Moving to next rep:", nextRep);
+      setCurrentRep(nextRep);
+      Speech.speak(`${nextRep}`);
+    } else {
+      // 一組完成
+      console.log("[RepJustCompleted] Set completed. currentSet:", currentSet, "sets:", sets, "will rest:", currentSet < sets);
+      if (currentSet < sets) {
+        const nextSet = currentSet + 1;
+
+        if (restBetweenSets <= 0) {
+          console.log("[RepJustCompleted] No rest configured, advancing directly to next set", nextSet);
+          setCurrentSet(nextSet);
+          setCurrentRep(1);
+          setState("exercising");
+          Speech.speak(`第${currentSet}組完成，直接進入第${nextSet}組，請準備墊腳尖並夾緊臀部`);
+        } else {
+          // 進入休息
+          console.log("[RepJustCompleted] Entering rest state for", restBetweenSets, "seconds");
+          setState("resting");
+          setTimeRemaining(restBetweenSets);
+          Speech.speak(`第${currentSet}組完成，開始組間休息${restBetweenSets}秒，請放鬆，稍後進行第${nextSet}組`);
+        }
+      } else {
+        // 所有組完成
+        console.log("[RepJustCompleted] All sets completed");
+        setState("completed");
+        Speech.speak("全部組數完成，運動已結束，做得很好！");
+      }
+    }
+  }, [repJustCompleted, currentRep, reps, currentSet, sets]);
+
+  // 監聽下一組準備信號
+  useEffect(() => {
+    if (!nextSetReady) return;
+
+    console.log("[NextSetReady] Triggered! currentSet:", currentSet, "sets:", sets);
+    setNextSetReady(false);
+
+    const nextSet = currentSet + 1;
+    console.log("[NextSetReady] nextSet calculated:", nextSet, "nextSet <= sets:", nextSet <= sets);
+    
+    if (nextSet <= sets) {
+      // 開始下一組
+      console.log("[NextSetReady] Starting set", nextSet);
+      setCurrentSet(nextSet);
+      setCurrentRep(1);
+      setState("exercising");
+      const msg = `休息完成，第${nextSet}組開始，請準備墊腳尖並夾緊臀部`;
+      console.log("[NextSetReady] Speaking:", msg);
+      Speech.speak(msg);
+    } else {
+      // 所有組完成
+      console.log("[NextSetReady] All sets completed");
+      setState("completed");
+      const msg = "全部組數完成，運動已結束，做得很好！";
+      console.log("[NextSetReady] Speaking:", msg);
+      Speech.speak(msg);
+    }
+  }, [nextSetReady, currentSet, sets]);
 
   // 計時器邏輯
   useEffect(() => {
@@ -106,29 +179,18 @@ const KegelExerciseSession: React.FC<KegelExerciseSessionProps> = ({
     }
 
     if (!timerInterval.current && state === "resting") {
+      console.log("[Timer] Starting rest timer, initial timeRemaining:", timeRemaining, "restBetweenSets:", restBetweenSets);
       timerInterval.current = setInterval(() => {
         setTimeRemaining((prev) => {
           if (prev <= 1) {
-            // 休息時間結束
+            // 休息時間結束，觸發下一組邏輯
             if (timerInterval.current) {
               clearInterval(timerInterval.current);
               timerInterval.current = null;
             }
-
-            const nextSet = currentSet + 1;
-            if (nextSet <= sets) {
-              // 開始下一組
-              setCurrentSet(nextSet);
-              setCurrentRep(1);
-              setState("exercising");
-              Speech.speak(`第${nextSet}組，開始`);
-              return restBetweenSets;
-            } else {
-              // 所有組完成
-              setState("completed");
-              Speech.speak("運動完成，做得很好！");
-              return 0;
-            }
+            console.log("[Timer] ⏰ Rest time ended! Setting nextSetReady = true");
+            setNextSetReady(true);
+            return 0; // 設置為 0，不要返回 restBetweenSets（否則會重新倒數）
           }
           return prev - 1;
         });
@@ -140,7 +202,7 @@ const KegelExerciseSession: React.FC<KegelExerciseSessionProps> = ({
         clearInterval(timerInterval.current);
       }
     };
-  }, [state, isPaused, currentSet, restBetweenSets, sets]);
+  }, [state, isPaused, restBetweenSets]);
 
   const getExerciseTitle = () => {
     switch (type) {
@@ -155,24 +217,66 @@ const KegelExerciseSession: React.FC<KegelExerciseSessionProps> = ({
     }
   };
 
-  const handleRepComplete = () => {
-    if (currentRep < reps) {
-      const nextRep = currentRep + 1;
-      setCurrentRep(nextRep);
-      Speech.speak(`${nextRep}`);
-    } else {
-      // 一組完成
-      Speech.speak("一組完成");
-      if (currentSet < sets) {
-        setState("resting");
-        setTimeRemaining(restBetweenSets);
-        Speech.speak(`組間休息${restBetweenSets}秒`);
-      } else {
-        // 所有組完成
-        setState("completed");
-        Speech.speak("運動完成，做得很好！");
+  const isLikelyStandingPose = (pose: Pose): boolean => {
+    const leftHip = pose[BodyPartIndex.LEFT_HIP as unknown as any];
+    const rightHip = pose[BodyPartIndex.RIGHT_HIP as unknown as any];
+    const leftKnee = pose[BodyPartIndex.LEFT_KNEE as unknown as any];
+    const rightKnee = pose[BodyPartIndex.RIGHT_KNEE as unknown as any];
+    const leftAnkle = pose[BodyPartIndex.LEFT_ANKLE as unknown as any];
+    const rightAnkle = pose[BodyPartIndex.RIGHT_ANKLE as unknown as any];
+
+    if (!leftHip || !rightHip || !leftKnee || !rightKnee || !leftAnkle || !rightAnkle) {
+      const visiblePoints = [leftHip, rightHip, leftKnee, rightKnee, leftAnkle, rightAnkle].filter(
+        (point) => point && (typeof point.visibility !== "number" || point.visibility >= 0.2),
+      ).length;
+
+      if (visiblePoints < 3) {
+        return false;
       }
     }
+
+    const minVisibility = 0.2;
+    const leftChainVisible =
+      leftHip && leftKnee && leftAnkle &&
+      (typeof leftHip.visibility !== "number" || leftHip.visibility >= minVisibility) &&
+      (typeof leftKnee.visibility !== "number" || leftKnee.visibility >= minVisibility) &&
+      (typeof leftAnkle.visibility !== "number" || leftAnkle.visibility >= minVisibility);
+    const rightChainVisible =
+      rightHip && rightKnee && rightAnkle &&
+      (typeof rightHip.visibility !== "number" || rightHip.visibility >= minVisibility) &&
+      (typeof rightKnee.visibility !== "number" || rightKnee.visibility >= minVisibility) &&
+      (typeof rightAnkle.visibility !== "number" || rightAnkle.visibility >= minVisibility);
+
+    if (!leftChainVisible && !rightChainVisible) {
+      return false;
+    }
+
+    const hips: number[] = [];
+    const knees: number[] = [];
+    const ankles: number[] = [];
+
+    if (leftChainVisible && leftHip && leftKnee && leftAnkle) {
+      hips.push(leftHip.y);
+      knees.push(leftKnee.y);
+      ankles.push(leftAnkle.y);
+    }
+
+    if (rightChainVisible && rightHip && rightKnee && rightAnkle) {
+      hips.push(rightHip.y);
+      knees.push(rightKnee.y);
+      ankles.push(rightAnkle.y);
+    }
+
+    const avgHipY = hips.reduce((sum, value) => sum + value, 0) / hips.length;
+    const avgKneeY = knees.reduce((sum, value) => sum + value, 0) / knees.length;
+    const avgAnkleY = ankles.reduce((sum, value) => sum + value, 0) / ankles.length;
+
+    const kneesBelowHips = avgKneeY > avgHipY;
+    const anklesBelowKnees = avgAnkleY > avgKneeY;
+    const hipToAnkle = Math.abs(avgAnkleY - avgHipY);
+
+    // 基本站姿條件：下肢垂直順序 + 足夠身高跨度
+    return kneesBelowHips && anklesBelowKnees && hipToAnkle > 0.12;
   };
 
   const handlePause = () => {
@@ -210,6 +314,9 @@ const KegelExerciseSession: React.FC<KegelExerciseSessionProps> = ({
 
   const handlePoseDetected = (pose: Pose) => {
     if (isPaused) return;
+    if (type === PostureType.STANDING && (state === "resting" || state === "completed" || state === "cancelled")) {
+      return;
+    }
     // 非站姿模式僅在 exercising 時處理偵測
     if (type !== PostureType.STANDING && state !== "exercising") return;
 
@@ -221,7 +328,8 @@ const KegelExerciseSession: React.FC<KegelExerciseSessionProps> = ({
         // 如果還沒進入站姿等待，檢查是否為站姿
         if (standingState.current === "idle" || standingState.current === "awaitingStanding") {
           standingState.current = "awaitingStanding";
-          const isStandingDetected = !!result.detectedPostures.standing?.isStanding;
+          const isStandingDetected =
+            isLikelyStandingPose(pose) || !!result.detectedPostures.standing?.isStanding;
           standingStableFrames.current = isStandingDetected
             ? standingStableFrames.current + 1
             : 0;
@@ -239,13 +347,13 @@ const KegelExerciseSession: React.FC<KegelExerciseSessionProps> = ({
             standingStableFrames.current,
           );
 
-          if (standingStableFrames.current >= 3) {
+          if (standingStableFrames.current >= 2) {
             // 偵測到站姿後，進入 exercising 並準備偵測墊腳尖
             setState("exercising");
             setCurrentRep(1);
             standingState.current = "readyForTiptoe";
             standingStableFrames.current = 0;
-            Speech.speak("偵測到站姿，開始凱格爾運動，請準備墊腳尖並夾緊臀部");
+            Speech.speak(`偵測到站姿，第 1 組開始，請準備墊腳尖並夾緊臀部`);
           } else if (
             result.detectedPostures.standing?.isStanding &&
             !result.detectedPostures.standing?.isProperPosture
@@ -288,8 +396,8 @@ const KegelExerciseSession: React.FC<KegelExerciseSessionProps> = ({
                   holdTimer.current = null;
                 }
                 standingState.current = "readyForTiptoe";
-                // 完成一個重複
-                handleRepComplete();
+                // 觸發一次重複完成邏輯（避免閉包陳舊值）
+                setRepJustCompleted(true);
                 setHoldSecondsLeft(0);
               }
             }, 1000) as unknown as NodeJS.Timeout;

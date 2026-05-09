@@ -112,7 +112,9 @@ const UnifiedPostureAnalyzer: React.FC<UnifiedPostureAnalyzerProps> = ({
   const squeezeHipBaseline = useRef<number | null>(null);
   const HIP_SQUEEZE_THRESHOLD = 0.03; // 基線減少超過此值視為夾緊臀部
   const lastGluteReminderAt = useRef<number>(0);
-  const configuredKegelRounds = exerciseConfig?.reps ?? 5;
+  const configuredKegelSets = exerciseConfig?.sets ?? 1;
+  const configuredKegelReps = exerciseConfig?.reps ?? 5;
+  const configuredKegelRounds = configuredKegelSets * configuredKegelReps;
   const configuredKegelPosture = exerciseConfig?.type ?? null;
 
   const speechRecognitionListeners = useRef<{
@@ -234,7 +236,7 @@ const UnifiedPostureAnalyzer: React.FC<UnifiedPostureAnalyzerProps> = ({
       const now = Date.now();
       nextKegelCueAt.current = now + 300;
 
-      const startMessage = `收到，開始進行${safeRounds}次，請夾緊臀部並墊起腳尖5秒`;
+      const startMessage = `收到，開始進行${configuredKegelSets}組，每組${configuredKegelReps}次，共${safeRounds}次，請夾緊臀部並墊起腳尖5秒`;
       speakText(startMessage);
       lastSpeechTime.current = now;
       lastSpokenFeedback.current = startMessage;
@@ -281,7 +283,7 @@ const UnifiedPostureAnalyzer: React.FC<UnifiedPostureAnalyzerProps> = ({
         ankleLiftBaseline.current = null;
       }
 
-      const startMessage = `收到，開始進行${safeRounds}次坐姿凱格爾，現在升直雙腳`;
+      const startMessage = `收到，開始進行${configuredKegelSets}組，每組${configuredKegelReps}次，共${safeRounds}次坐姿凱格爾，現在升直雙腳`;
       speakText(startMessage);
       lastSpeechTime.current = now;
       lastSpokenFeedback.current = startMessage;
