@@ -1,6 +1,6 @@
 import { Pose } from "@/types/types";
 import { Camera } from "expo-camera";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 import { WebView } from "react-native-webview";
 
@@ -44,6 +44,7 @@ export default function HumanPose(p: HumanPoseProps) {
   const [loading, setLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
   const [hasPermission, setHasPermission] = useState<boolean | null>(null);
+  const webviewRef = useRef<WebView>(null);
 
   const onPoseDetected = (pose: Pose) => {
     if (p.onPoseDetected) {
@@ -57,6 +58,11 @@ export default function HumanPose(p: HumanPoseProps) {
       setHasPermission(status === "granted");
     })();
   }, []);
+
+  useEffect(() => {
+    setLoading(true);
+    setHasError(false);
+  }, [p.enableSkeleton, p.enableKeyPoints, p.color, p.mode, p.scoreThreshold, p.isBackCamera, p.flipHorizontal, p.isFullScreen]);
 
   const blazePose = "https://pose.vinhintw.com";
   const webViewUrl = `${blazePose}/?enableSkeleton=${
@@ -97,9 +103,12 @@ export default function HumanPose(p: HumanPoseProps) {
         </View>
       )}
       <WebView
+        ref={webviewRef}
+        key={webViewUrl}
         style={styles.webview}
         source={{ uri: webViewUrl }}
         mediaPlaybackRequiresUserAction={false}
+        mediaCapturePermissionGrantType={"grant"}
         javaScriptEnabled
         domStorageEnabled
         allowsInlineMediaPlayback
@@ -111,6 +120,26 @@ export default function HumanPose(p: HumanPoseProps) {
         onLoadEnd={() => {
           setLoading(false);
           console.log("blazePose WebView loaded");
+        }}
+        onRenderProcessGone={(syntheticEvent) => {
+          console.warn("WebView render process gone:", syntheticEvent.nativeEvent);
+          setHasError(false);
+          setLoading(true);
+          try {
+            webviewRef.current?.reload();
+          } catch (e) {
+            console.warn(e);
+          }
+        }}
+        onContentProcessDidTerminate={(syntheticEvent) => {
+          console.warn("WebView content process terminated:", syntheticEvent.nativeEvent);
+          setHasError(false);
+          setLoading(true);
+          try {
+            webviewRef.current?.reload();
+          } catch (e) {
+            console.warn(e);
+          }
         }}
         onError={(syntheticEvent) => {
           console.error("WebView error:", syntheticEvent.nativeEvent);

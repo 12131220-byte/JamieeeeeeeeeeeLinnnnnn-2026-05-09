@@ -4,15 +4,23 @@ import {
     UnifiedPostureResult
 } from "@/types/types";
 import { detectLyingPosture } from "./lying-pose-detector";
+import { detectSittingPosture } from "./sitting-pose-detector";
+import { detectStandingPosture } from "./standing-pose-detector";
 
 /**
  * 統一的姿勢分析器
  * 同時檢測坐、站、躺三種姿勢，並判定最可能的姿勢類型
  */
 export function analyzePosture(pose: Pose): UnifiedPostureResult {
+
+  // 呼叫各姿勢檢測器
   const lyingResult = detectLyingPosture(pose);
+  const sittingResult = detectSittingPosture(pose);
+  const standingResult = detectStandingPosture(pose);
 
   const lyingScore = lyingResult.isLying ? lyingResult.confidence : 0;
+  const sittingScore = sittingResult.isSitting ? sittingResult.confidence : 0;
+  const standingScore = standingResult.isStanding ? standingResult.confidence : 0;
 
   // 決定最可能的姿勢類型
   let primaryPosture = PostureType.UNKNOWN;
@@ -22,9 +30,17 @@ export function analyzePosture(pose: Pose): UnifiedPostureResult {
     primaryPosture = PostureType.LYING;
     maxScore = lyingScore;
   }
+  if (sittingScore > maxScore) {
+    primaryPosture = PostureType.SITTING;
+    maxScore = sittingScore;
+  }
+  if (standingScore > maxScore) {
+    primaryPosture = PostureType.STANDING;
+    maxScore = standingScore;
+  }
 
   // 計算綜合評分（基於最可能的姿勢）
-  const overallScore = primaryPosture === PostureType.LYING ? lyingScore : 0;
+  const overallScore = maxScore;
 
   return {
     postureType: primaryPosture,
@@ -44,21 +60,7 @@ export function analyzePosture(pose: Pose): UnifiedPostureResult {
           feetPositionScore: 0,
         },
       },
-      standing: {
-        isStanding: false,
-        confidence: 0,
-        bodyAlignment: null,
-        shoulderAlignment: null,
-        kneeFlexion: null,
-        isProperPosture: false,
-        postureFeedback: [],
-        scores: {
-          alignmentScore: 0,
-          shoulderScore: 0,
-          kneeScore: 0,
-          bodyHeightScore: 0,
-        },
-      },
+      standing: standingResult,
       lying: lyingResult,
     },
     primaryPosture,

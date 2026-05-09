@@ -18,13 +18,13 @@ import { arePointsVisible, calculateAngle } from "./geometry";
  * 3. 肩膀和髖部相對接近（身體拉直）
  */
 export function detectStandingPosture(pose: Pose): StandingPostureResult {
-  const MIN_VERTICAL_BODY_RATIO = 0.35;
-  const MIN_SHOULDER_TO_HIP_DISTANCE = 0.04;
-  const MAX_ALIGNMENT_DEVIATION = 0.085;
-  const MAX_SHOULDER_OR_HIP_TILT = 0.045;
-  const MAX_KNEE_FLEXION_DEVIATION = 22;
-  const MIN_PROPER_POSTURE_SCORE = 0.6;
-  const FRONT_FACING_BONUS_WEIGHT = 0.1;
+  const MIN_VERTICAL_BODY_RATIO = 0.25;
+  const MIN_SHOULDER_TO_HIP_DISTANCE = 0.02;
+  const MAX_ALIGNMENT_DEVIATION = 0.12;
+  const MAX_SHOULDER_OR_HIP_TILT = 0.08;
+  const MAX_KNEE_FLEXION_DEVIATION = 35;
+  const MIN_PROPER_POSTURE_SCORE = 0.45;
+  const FRONT_FACING_BONUS_WEIGHT = 0;
 
   const leftShoulder = pose[BodyPartIndex.LEFT_SHOULDER] as
     | KeyPoint
@@ -108,8 +108,16 @@ export function detectStandingPosture(pose: Pose): StandingPostureResult {
     需要比例: `> ${MIN_VERTICAL_BODY_RATIO} (已放寬)`,
   });
 
-  // 坐姿很容易同時滿足「膝蓋在臀部下」與「腳踝在膝蓋下」，
+  // 坐姿很容易同時滿足「膝蓋在臀部下」與「腳踝在膝蓋下」,
   // 因此站姿需要再加上膝蓋接近伸直的條件，避免把坐姿誤判成站姿。
+  // 計算膝蓋角度以判定是否伸直
+  let avgKneeAngleForDetection = 180;
+  if (leftKnee && leftHip && leftAnkle && rightKnee && rightHip && rightAnkle) {
+    const leftKneeAngleForDetection = calculateAngle(leftHip, leftKnee, leftAnkle);
+    const rightKneeAngleForDetection = calculateAngle(rightHip, rightKnee, rightAnkle);
+    avgKneeAngleForDetection = (leftKneeAngleForDetection + rightKneeAngleForDetection) / 2;
+  }
+
   const kneesExtendedEnough =
     Math.abs(avgKneeAngleForDetection - 180) <= MAX_KNEE_FLEXION_DEVIATION;
   if (!kneesExtendedEnough) {
@@ -177,8 +185,8 @@ export function detectStandingPosture(pose: Pose): StandingPostureResult {
   const frontFacingRatio = (shoulderWidth + hipWidth) / 2 / torsoReference;
   const frontFacingScore = Math.max(0, Math.min(1, frontFacingRatio / 0.22));
 
-  if (frontFacingScore < 0.35) {
-    result.postureFeedback.push("請保持身體正面面向鏡頭，讓肩膀與髖部更容易被辨識");
+  if (frontFacingScore < 0.2) {
+    result.postureFeedback.push("側邊視角可用，請盡量讓身體輪廓完整入鏡");
   }
 
   // 6. 膝蓋彎曲度

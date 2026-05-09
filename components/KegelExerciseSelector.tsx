@@ -1,13 +1,13 @@
 import { PostureType } from "@/types/types";
 import React, { useState } from "react";
 import {
-    Modal,
-    Pressable,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    View,
+  Modal,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
 } from "react-native";
 
 export interface KegelExerciseConfig {
@@ -35,32 +35,6 @@ const KEGEL_EXERCISES = [
       "✓ 鍛鍊臀肌和骨盆底肌肉",
       "✓ 改善身體平衡",
       "✓ 增強腿部力量",
-    ],
-  },
-  {
-    type: PostureType.SITTING,
-    title: "坐姿凱格爾",
-    description: "伸直雙腳、夾緊臀部",
-    icon: "🪑",
-    color: "#7C3AED",
-    lightColor: "#F5EFFF",
-    details: [
-      "✓ 加強核心肌群",
-      "✓ 改善坐姿習慣",
-      "✓ 提升骨盆底肌力",
-    ],
-  },
-  {
-    type: PostureType.LYING,
-    title: "躺姿凱格爾",
-    description: "放鬆身體、夾緊臀部",
-    icon: "🛏️",
-    color: "#DC2626",
-    lightColor: "#FEE2E2",
-    details: [
-      "✓ 深度鍛鍊盆底肌肉",
-      "✓ 舒緩腰部壓力",
-      "✓ 促進肌肉恢復",
     ],
   },
 ];
@@ -132,7 +106,7 @@ const KegelExerciseSelector: React.FC<KegelExerciseSelectorProps> = ({
           {step === "select" ? (
             <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
               <Text style={styles.sectionHint}>
-                選擇適合你的凱格爾運動類型
+                點選站姿凱格爾，進入站姿偵測與訓練流程
               </Text>
 
               {KEGEL_EXERCISES.map((exercise) => (
@@ -167,7 +141,7 @@ const KegelExerciseSelector: React.FC<KegelExerciseSelectorProps> = ({
               <View style={styles.tipCard}>
                 <Text style={styles.tipTitle}>💡 貼士</Text>
                 <Text style={styles.tipText}>
-                  每天進行凱格爾運動可以有效改善盆底肌肉健康。建議從較少的組數和次數開始，逐漸增加。
+                  目前僅提供站姿凱格爾訓練，流程會先偵測站姿，再引導你墊腳尖與夾緊臀部。
                 </Text>
               </View>
             </ScrollView>
