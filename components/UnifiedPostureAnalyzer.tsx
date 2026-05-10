@@ -585,7 +585,7 @@ const UnifiedPostureAnalyzer: React.FC<UnifiedPostureAnalyzerProps> = ({
           }
 
           if (sitting.scores.feetPositionScore < 0.8) {
-            return "請把雙腳完整踩地，避免翹腳或懸空";
+            return "請分配雙腳中心，站穩腳步";
           }
 
           if (sitting.scores.hipPositionScore < 0.7) {
@@ -694,7 +694,7 @@ const UnifiedPostureAnalyzer: React.FC<UnifiedPostureAnalyzerProps> = ({
     kegelStage.current = "tiptoe_detect";
     nextKegelCueAt.current = now + 1200;
     tiptoeStableCount.current = 0;
-    lastTiptoeReminderAt.current = 0;
+    // 不重置 lastTiptoeReminderAt，保持已設定的值以防止重複播放
     tiptoeBaselineCaptured.current = false;
     tiptoeBaselineLeftLift.current = 0;
     tiptoeBaselineRightLift.current = 0;
@@ -705,7 +705,7 @@ const UnifiedPostureAnalyzer: React.FC<UnifiedPostureAnalyzerProps> = ({
     kegelStage.current = "leg_stretch_detect";
     nextKegelCueAt.current = now + 300;
     legStretchStableCount.current = 0;
-    lastLegStretchReminderAt.current = 0;
+    // 不重置 lastLegStretchReminderAt，保持已設定的值以防止重複播放
   }, [pose]);
 
   useEffect(() => {
@@ -783,8 +783,8 @@ const UnifiedPostureAnalyzer: React.FC<UnifiedPostureAnalyzerProps> = ({
       if (kegelStage.current === "tiptoe_detect") {
         if (
           !isSpeaking.current &&
-          !lastTiptoeReminderAt.current &&
-          now >= nextKegelCueAt.current
+          now >= nextKegelCueAt.current &&
+          (now - (lastTiptoeReminderAt.current || 0) > 1000)
         ) {
           const repInSet = roundsInCurrentSet.current + 1;
           const prompt = `第${currentKegelSet.current}組第${repInSet}次，夾緊臀部並墊起腳尖5秒`;
@@ -880,6 +880,7 @@ const UnifiedPostureAnalyzer: React.FC<UnifiedPostureAnalyzerProps> = ({
                   roundsInCurrentSet.current = 0;
                   const resumeMsg = `休息結束，第${nextSetNum}組開始，請夾緊臀部並墊起腳尖5秒`;
                   speakText(resumeMsg);
+                  // lastTiptoeReminderAt.current 已在 setTimeout 中設定，prepareNextStandingTiptoeRound 不會重置
                   prepareNextStandingTiptoeRound(Date.now());
                 }, configuredKegelRest * 1000) as unknown as NodeJS.Timeout;
                 // 同步畫面倒數與最後 10 秒語音倒數
@@ -888,6 +889,7 @@ const UnifiedPostureAnalyzer: React.FC<UnifiedPostureAnalyzerProps> = ({
                   clearInterval(restInterval.current);
                   restInterval.current = null;
                 }
+                let readyAlertSent = false;
                 restInterval.current = setInterval(() => {
                   setRestSecondsLeftState((prev) => {
                     const next = prev - 1;
@@ -898,12 +900,10 @@ const UnifiedPostureAnalyzer: React.FC<UnifiedPostureAnalyzerProps> = ({
                       }
                       return 0;
                     }
-                    // 最後 10 秒以語音倒數
-                    if (next <= 10 && next > 0) {
-                      // 避免打斷其他正在播放的語音
-                      if (!isSpeaking.current) {
-                        speakText(String(next));
-                      }
+                    // 在剩餘 3 秒時播放一次「準備好了嗎」提醒
+                    if (next === 3 && !readyAlertSent && !isSpeaking.current) {
+                      speakText("準備好了嗎，即將開始");
+                      readyAlertSent = true;
                     }
                     return next;
                   });
@@ -959,7 +959,7 @@ const UnifiedPostureAnalyzer: React.FC<UnifiedPostureAnalyzerProps> = ({
         if (
           !isSpeaking.current &&
           now >= nextKegelCueAt.current &&
-          !lastLegStretchReminderAt.current
+          (now - (lastLegStretchReminderAt.current || 0) > 1000)
         ) {
           const stretchPrompt = "現在升直雙腳";
           speakText(stretchPrompt);
@@ -1027,6 +1027,7 @@ const UnifiedPostureAnalyzer: React.FC<UnifiedPostureAnalyzerProps> = ({
                   roundsInCurrentSet.current = 0;
                   const resumeMsg = `休息結束，第${nextSetNum}組開始，現在升直雙腳`;
                   speakText(resumeMsg);
+                  // lastLegStretchReminderAt.current 已在 setTimeout 中設定，prepareNextSittingLegRound 不會重置
                   prepareNextSittingLegRound(Date.now());
                 }, configuredKegelRest * 1000) as unknown as NodeJS.Timeout;
                 // 同步畫面倒數與最後 10 秒語音倒數
@@ -1035,6 +1036,7 @@ const UnifiedPostureAnalyzer: React.FC<UnifiedPostureAnalyzerProps> = ({
                   clearInterval(restInterval.current);
                   restInterval.current = null;
                 }
+                let readyAlertSent = false;
                 restInterval.current = setInterval(() => {
                   setRestSecondsLeftState((prev) => {
                     const next = prev - 1;
@@ -1045,10 +1047,10 @@ const UnifiedPostureAnalyzer: React.FC<UnifiedPostureAnalyzerProps> = ({
                       }
                       return 0;
                     }
-                    if (next <= 10 && next > 0) {
-                      if (!isSpeaking.current) {
-                        speakText(String(next));
-                      }
+                    // 在剩餘 3 秒時播放一次「準備好了嗎」提醒
+                    if (next === 3 && !readyAlertSent && !isSpeaking.current) {
+                      speakText("10秒後開始下一組凱格爾運動");
+                      readyAlertSent = true;
                     }
                     return next;
                   });
