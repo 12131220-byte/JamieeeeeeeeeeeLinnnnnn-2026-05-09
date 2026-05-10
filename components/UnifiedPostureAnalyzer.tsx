@@ -116,6 +116,15 @@ const UnifiedPostureAnalyzer: React.FC<UnifiedPostureAnalyzerProps> = ({
   const configuredKegelReps = exerciseConfig?.reps ?? 5;
   const configuredKegelRounds = configuredKegelSets * configuredKegelReps;
   const configuredKegelPosture = exerciseConfig?.type ?? null;
+  const configuredKegelRest = exerciseConfig?.restBetweenSets ?? 0;
+
+  // 組內與組間狀態
+  const currentKegelSet = useRef<number>(1);
+  const roundsInCurrentSet = useRef<number>(0);
+  const isInSetRest = useRef<boolean>(false);
+  const setRestTimer = useRef<NodeJS.Timeout | null>(null);
+  const restInterval = useRef<NodeJS.Timeout | null>(null);
+  const [restSecondsLeftState, setRestSecondsLeftState] = useState<number>(0);
 
   const speechRecognitionListeners = useRef<{
     start?: { remove: () => void };
@@ -219,6 +228,14 @@ const UnifiedPostureAnalyzer: React.FC<UnifiedPostureAnalyzerProps> = ({
       hasStartedSittingKegel.current = false;
       targetKegelRounds.current = safeRounds;
       completedKegelRounds.current = 0;
+      // 初始化組別追蹤
+      currentKegelSet.current = 1;
+      roundsInCurrentSet.current = 0;
+      isInSetRest.current = false;
+      if (setRestTimer.current) {
+        clearTimeout(setRestTimer.current);
+        setRestTimer.current = null;
+      }
       tiptoeStableCount.current = 0;
       lastTiptoeReminderAt.current = 0;
       tiptoeBaselineCaptured.current = false;
@@ -252,6 +269,14 @@ const UnifiedPostureAnalyzer: React.FC<UnifiedPostureAnalyzerProps> = ({
       hasStartedSittingKegel.current = true;
       targetKegelRounds.current = safeRounds;
       completedKegelRounds.current = 0;
+      // 初始化組別追蹤
+      currentKegelSet.current = 1;
+      roundsInCurrentSet.current = 0;
+      isInSetRest.current = false;
+      if (setRestTimer.current) {
+        clearTimeout(setRestTimer.current);
+        setRestTimer.current = null;
+      }
       legStretchStableCount.current = 0;
       lastLegStretchReminderAt.current = 0;
 
@@ -649,6 +674,19 @@ const UnifiedPostureAnalyzer: React.FC<UnifiedPostureAnalyzerProps> = ({
     setIsListeningForKegel(false);
     setSpeechTranscript("");
     setSpeechError("");
+    // reset set/round tracking
+    currentKegelSet.current = 1;
+    roundsInCurrentSet.current = 0;
+    isInSetRest.current = false;
+    if (setRestTimer.current) {
+      clearTimeout(setRestTimer.current);
+      setRestTimer.current = null;
+    }
+    if (restInterval.current) {
+      clearInterval(restInterval.current);
+      restInterval.current = null;
+    }
+    setRestSecondsLeftState(0);
   }, []);
 
   const prepareNextStandingTiptoeRound = useCallback((now: number) => {
@@ -802,23 +840,97 @@ const UnifiedPostureAnalyzer: React.FC<UnifiedPostureAnalyzerProps> = ({
 
         if (tiptoeCountdownRemaining.current === 0 && !isSpeaking.current) {
           completedKegelRounds.current += 1;
-          const remaining = targetKegelRounds.current - completedKegelRounds.current;
+          roundsInCurrentSet.current += 1;
+          const remainingTotal = targetKegelRounds.current - completedKegelRounds.current;
 
-          if (remaining > 0) {
-            const nextRoundCue = `本次完成，請放下腳跟，還有${remaining}次`;
-            speakText(nextRoundCue);
+          // 如果完成了本組的次數
+          if (roundsInCurrentSet.current >= configuredKegelReps) {
+            const finishedSet = currentKegelSet.current;
+            // 如果還有下一組
+            if (finishedSet < configuredKegelSets) {
+              const nextSetNum = finishedSet + 1;
+              // 進入組間休息
+              if (configuredKegelRest > 0) {
+                isInSetRest.current = true;
+                const restMsg = `第${finishedSet}組完成，開始休息${configuredKegelRest}秒，請放鬆肌肉，稍後進入第${nextSetNum}組`;
+                speakText(restMsg);
+                lastSpeechTime.current = now;
+                lastSpokenFeedback.current = restMsg;
+                // 設定休息計時器，休息結束後開始下一組
+                if (setRestTimer.current) {
+                  clearTimeout(setRestTimer.current);
+                  setRestTimer.current = null;
+                }
+                setRestTimer.current = setTimeout(() => {
+                  // 結束休息
+                  isInSetRest.current = false;
+                  // 清除 interval
+                  if (restInterval.current) {
+                    clearInterval(restInterval.current);
+                    restInterval.current = null;
+                  }
+                  setRestSecondsLeftState(0);
+                  currentKegelSet.current = nextSetNum;
+                  roundsInCurrentSet.current = 0;
+                  const resumeMsg = `休息結束，第${nextSetNum}組開始，請夾緊臀部並墊起腳尖5秒`;
+                  speakText(resumeMsg);
+                  prepareNextStandingTiptoeRound(Date.now());
+                }, configuredKegelRest * 1000) as unknown as NodeJS.Timeout;
+                // 同步畫面倒數與最後 10 秒語音倒數
+                setRestSecondsLeftState(configuredKegelRest);
+                if (restInterval.current) {
+                  clearInterval(restInterval.current);
+                  restInterval.current = null;
+                }
+                restInterval.current = setInterval(() => {
+                  setRestSecondsLeftState((prev) => {
+                    const next = prev - 1;
+                    if (next <= 0) {
+                      if (restInterval.current) {
+                        clearInterval(restInterval.current);
+                        restInterval.current = null;
+                      }
+                      return 0;
+                    }
+                    // 最後 10 秒以語音倒數
+                    if (next <= 10 && next > 0) {
+                      // 避免打斷其他正在播放的語音
+                      if (!isSpeaking.current) {
+                        speakText(next.toString());
+                      }
+                    }
+                    return next;
+                  });
+                }, 1000) as unknown as NodeJS.Timeout;
+                return;
+              } else {
+                // 無休息，直接進入下一組
+                currentKegelSet.current = nextSetNum;
+                roundsInCurrentSet.current = 0;
+                const nextMsg = `第${finishedSet}組完成，直接進入第${nextSetNum}組，請夾緊臀部並墊起腳尖5秒`;
+                speakText(nextMsg);
+                lastSpeechTime.current = now;
+                lastSpokenFeedback.current = nextMsg;
+                prepareNextStandingTiptoeRound(now);
+                return;
+              }
+            }
+
+            // 最後一組完成
+            const finishCue = "全部完成，今天的站姿凱格爾結束";
+            speakText(finishCue);
             lastSpeechTime.current = now;
-            lastSpokenFeedback.current = nextRoundCue;
-
-            prepareNextStandingTiptoeRound(now);
+            lastSpokenFeedback.current = finishCue;
+            kegelStage.current = "done";
             return;
           }
 
-          const finishCue = "全部完成，今天的站姿凱格爾結束";
-          speakText(finishCue);
+          // 組內未滿，繼續下一次
+          const nextRoundCue = `本次完成，還有${remainingTotal}次`;
+          speakText(nextRoundCue);
           lastSpeechTime.current = now;
-          lastSpokenFeedback.current = finishCue;
-          kegelStage.current = "done";
+          lastSpokenFeedback.current = nextRoundCue;
+          prepareNextStandingTiptoeRound(now);
           return;
         }
       }
@@ -877,23 +989,87 @@ const UnifiedPostureAnalyzer: React.FC<UnifiedPostureAnalyzerProps> = ({
 
         if (legCountdownRemaining.current === 0 && !isSpeaking.current) {
           completedKegelRounds.current += 1;
-          const remaining = targetKegelRounds.current - completedKegelRounds.current;
+          roundsInCurrentSet.current += 1;
+          const remainingTotal = targetKegelRounds.current - completedKegelRounds.current;
 
-          if (remaining > 0) {
-            const nextRoundCue = `本次完成，還有${remaining}次`;
-            speakText(nextRoundCue);
+          if (roundsInCurrentSet.current >= configuredKegelReps) {
+            const finishedSet = currentKegelSet.current;
+            if (finishedSet < configuredKegelSets) {
+              const nextSetNum = finishedSet + 1;
+              if (configuredKegelRest > 0) {
+                isInSetRest.current = true;
+                const restMsg = `第${finishedSet}組完成，開始休息${configuredKegelRest}秒，請放鬆肌肉，稍後進入第${nextSetNum}組`;
+                speakText(restMsg);
+                lastSpeechTime.current = now;
+                lastSpokenFeedback.current = restMsg;
+                if (setRestTimer.current) {
+                  clearTimeout(setRestTimer.current);
+                  setRestTimer.current = null;
+                }
+                setRestTimer.current = setTimeout(() => {
+                  // 結束休息
+                  isInSetRest.current = false;
+                  if (restInterval.current) {
+                    clearInterval(restInterval.current);
+                    restInterval.current = null;
+                  }
+                  setRestSecondsLeftState(0);
+                  currentKegelSet.current = nextSetNum;
+                  roundsInCurrentSet.current = 0;
+                  const resumeMsg = `休息結束，第${nextSetNum}組開始，現在升直雙腳`;
+                  speakText(resumeMsg);
+                  prepareNextSittingLegRound(Date.now());
+                }, configuredKegelRest * 1000) as unknown as NodeJS.Timeout;
+                // 同步畫面倒數與最後 10 秒語音倒數
+                setRestSecondsLeftState(configuredKegelRest);
+                if (restInterval.current) {
+                  clearInterval(restInterval.current);
+                  restInterval.current = null;
+                }
+                restInterval.current = setInterval(() => {
+                  setRestSecondsLeftState((prev) => {
+                    const next = prev - 1;
+                    if (next <= 0) {
+                      if (restInterval.current) {
+                        clearInterval(restInterval.current);
+                        restInterval.current = null;
+                      }
+                      return 0;
+                    }
+                    if (next <= 10 && next > 0) {
+                      if (!isSpeaking.current) {
+                        speakText(next.toString());
+                      }
+                    }
+                    return next;
+                  });
+                }, 1000) as unknown as NodeJS.Timeout;
+                return;
+              } else {
+                currentKegelSet.current = nextSetNum;
+                roundsInCurrentSet.current = 0;
+                const nextMsg = `第${finishedSet}組完成，直接進入第${nextSetNum}組`;
+                speakText(nextMsg);
+                lastSpeechTime.current = now;
+                lastSpokenFeedback.current = nextMsg;
+                prepareNextSittingLegRound(now);
+                return;
+              }
+            }
+
+            const finishCue = "全部完成，今天的坐姿凱格爾結束";
+            speakText(finishCue);
             lastSpeechTime.current = now;
-            lastSpokenFeedback.current = nextRoundCue;
-
-            prepareNextSittingLegRound(now);
+            lastSpokenFeedback.current = finishCue;
+            kegelStage.current = "done";
             return;
           }
 
-          const finishCue = "全部完成，今天的坐姿凱格爾結束";
-          speakText(finishCue);
+          const nextRoundCue = `本次完成，還有${remainingTotal}次`;
+          speakText(nextRoundCue);
           lastSpeechTime.current = now;
-          lastSpokenFeedback.current = finishCue;
-          kegelStage.current = "done";
+          lastSpokenFeedback.current = nextRoundCue;
+          prepareNextSittingLegRound(now);
           return;
         }
       }
@@ -959,6 +1135,18 @@ const UnifiedPostureAnalyzer: React.FC<UnifiedPostureAnalyzerProps> = ({
     prepareNextSittingLegRound,
     showKegelRepPrompt,
   ]);
+
+  // 畫面覆蓋：若正在組間休息則在中央顯示剩餘秒數（不阻擋觸控）
+  if (restSecondsLeftState > 0) {
+    return (
+      <View style={styles.restContainer} pointerEvents="none">
+        <View style={styles.restOverlay}>
+          <Text style={styles.restOverlayText}>{restSecondsLeftState}</Text>
+          <Text style={styles.restOverlayHint}>休息中</Text>
+        </View>
+      </View>
+    );
+  }
 
   return <View />;
 };
@@ -1056,6 +1244,33 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: "#0F766E",
     marginBottom: 8,
+  },
+  restContainer: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: "center",
+    alignItems: "center",
+    zIndex: 9999,
+  },
+  restOverlay: {
+    backgroundColor: "rgba(0,0,0,0.75)",
+    paddingVertical: 28,
+    paddingHorizontal: 36,
+    borderRadius: 16,
+    alignItems: "center",
+  },
+  restOverlayText: {
+    fontSize: 72,
+    color: "#FFFFFF",
+    fontWeight: "700",
+    marginBottom: 6,
+  },
+  restOverlayHint: {
+    fontSize: 16,
+    color: "#E5E7EB",
   },
   errorText: {
     fontSize: 13,
