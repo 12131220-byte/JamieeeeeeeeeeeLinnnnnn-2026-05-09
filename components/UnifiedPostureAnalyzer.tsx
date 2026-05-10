@@ -5,7 +5,8 @@ import * as Speech from "expo-speech";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   StyleSheet,
-  View
+  Text,
+  View,
 } from "react-native";
 import type { KegelExerciseConfig } from "./KegelExerciseSelector";
 
@@ -731,6 +732,11 @@ const UnifiedPostureAnalyzer: React.FC<UnifiedPostureAnalyzerProps> = ({
 
     if (onAnalysisComplete) {
       onAnalysisComplete(resolvedAnalysisResult);
+    }
+
+    // 如果目前正在組間休息，跳過後續的檢測與語音流程，避免重複進入休息邏輯或重置計時器
+    if (isInSetRest.current) {
+      return;
     }
 
     const isStandingNow =
