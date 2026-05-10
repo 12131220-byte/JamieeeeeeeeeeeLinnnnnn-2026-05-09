@@ -100,6 +100,7 @@ const UnifiedPostureAnalyzer: React.FC<UnifiedPostureAnalyzerProps> = ({
   const tiptoeBaselineLeftLift = useRef<number>(0);
   const tiptoeBaselineRightLift = useRef<number>(0);
   const awaitingTiptoeBaselineCapture = useRef<boolean>(false);
+  const shouldAnnounceNextTiptoe = useRef<boolean>(true);
   
   // 坐姿凱格爾 - 腿部伸直相關
   const legStretchStableCount = useRef<number>(0);
@@ -108,6 +109,7 @@ const UnifiedPostureAnalyzer: React.FC<UnifiedPostureAnalyzerProps> = ({
   const legCountdownRemaining = useRef<number>(0);
   const legCountdownNextTickAt = useRef<number>(0);
   const ankleLiftBaseline = useRef<number | null>(null); // 記錄腳踝進入檢測時的基準高度
+  const shouldAnnounceNextLeg = useRef<boolean>(true);
   
   // 坐姿凱格爾 - 夾臀基線與檢測
   const squeezeHipBaseline = useRef<number | null>(null);
@@ -249,6 +251,7 @@ const UnifiedPostureAnalyzer: React.FC<UnifiedPostureAnalyzerProps> = ({
       setIsListeningForKegel(false);
       setSpeechError("");
       setSpeechTranscript("");
+      shouldAnnounceNextTiptoe.current = true;
       kegelStage.current = "tiptoe_detect";
 
       const now = Date.now();
@@ -286,6 +289,7 @@ const UnifiedPostureAnalyzer: React.FC<UnifiedPostureAnalyzerProps> = ({
       setIsListeningForKegel(false);
       setSpeechError("");
       setSpeechTranscript("");
+      shouldAnnounceNextLeg.current = true;
       kegelStage.current = "leg_stretch_detect";
 
       const now = Date.now();
@@ -694,7 +698,8 @@ const UnifiedPostureAnalyzer: React.FC<UnifiedPostureAnalyzerProps> = ({
     kegelStage.current = "tiptoe_detect";
     nextKegelCueAt.current = now + 1200;
     tiptoeStableCount.current = 0;
-    // 不重置 lastTiptoeReminderAt，保持已設定的值以防止重複播放
+    // 每次準備下一次時，確保會播放夾臀部提示
+    shouldAnnounceNextTiptoe.current = true;
     tiptoeBaselineCaptured.current = false;
     tiptoeBaselineLeftLift.current = 0;
     tiptoeBaselineRightLift.current = 0;
@@ -705,7 +710,8 @@ const UnifiedPostureAnalyzer: React.FC<UnifiedPostureAnalyzerProps> = ({
     kegelStage.current = "leg_stretch_detect";
     nextKegelCueAt.current = now + 300;
     legStretchStableCount.current = 0;
-    // 不重置 lastLegStretchReminderAt，保持已設定的值以防止重複播放
+    // 每次準備下一次時，確保會播放夾臀部提示
+    shouldAnnounceNextLeg.current = true;
   }, [pose]);
 
   useEffect(() => {
@@ -784,7 +790,7 @@ const UnifiedPostureAnalyzer: React.FC<UnifiedPostureAnalyzerProps> = ({
         if (
           !isSpeaking.current &&
           now >= nextKegelCueAt.current &&
-          (now - (lastTiptoeReminderAt.current || 0) > 1000)
+          shouldAnnounceNextTiptoe.current
         ) {
           const repInSet = roundsInCurrentSet.current + 1;
           const prompt = `第${currentKegelSet.current}組第${repInSet}次，夾緊臀部並墊起腳尖5秒`;
@@ -792,6 +798,7 @@ const UnifiedPostureAnalyzer: React.FC<UnifiedPostureAnalyzerProps> = ({
           lastSpeechTime.current = now;
           lastSpokenFeedback.current = prompt;
           lastTiptoeReminderAt.current = now;
+          shouldAnnounceNextTiptoe.current = false;
           return;
         }
 
@@ -959,13 +966,14 @@ const UnifiedPostureAnalyzer: React.FC<UnifiedPostureAnalyzerProps> = ({
         if (
           !isSpeaking.current &&
           now >= nextKegelCueAt.current &&
-          (now - (lastLegStretchReminderAt.current || 0) > 1000)
+          shouldAnnounceNextLeg.current
         ) {
           const stretchPrompt = "現在升直雙腳";
           speakText(stretchPrompt);
           lastSpeechTime.current = now;
           lastSpokenFeedback.current = stretchPrompt;
           lastLegStretchReminderAt.current = now;
+          shouldAnnounceNextLeg.current = false;
           kegelStage.current = "leg_stretch_detect";
           return;
         }
