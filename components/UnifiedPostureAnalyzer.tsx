@@ -786,8 +786,8 @@ const UnifiedPostureAnalyzer: React.FC<UnifiedPostureAnalyzerProps> = ({
           !lastTiptoeReminderAt.current &&
           now >= nextKegelCueAt.current
         ) {
-          const currentRound = completedKegelRounds.current + 1;
-          const prompt = `第${currentRound}次，夾緊臀部並墊起腳尖5秒`;
+          const repInSet = roundsInCurrentSet.current + 1;
+          const prompt = `第${currentKegelSet.current}組第${repInSet}次，夾緊臀部並墊起腳尖5秒`;
           speakText(prompt);
           lastSpeechTime.current = now;
           lastSpokenFeedback.current = prompt;
@@ -931,8 +931,11 @@ const UnifiedPostureAnalyzer: React.FC<UnifiedPostureAnalyzerProps> = ({
             return;
           }
 
-          // 組內未滿，繼續下一次
-          const nextRoundCue = `本次完成，還有${remainingTotal}次`;
+          // 組內未滿，繼續下一次（以組與組內剩餘次數計算總剩餘）
+          const totalRemaining =
+            (configuredKegelSets - currentKegelSet.current) * configuredKegelReps +
+            (configuredKegelReps - roundsInCurrentSet.current);
+          const nextRoundCue = `本次完成，還有${totalRemaining}次`;
           speakText(nextRoundCue);
           lastSpeechTime.current = now;
           lastSpokenFeedback.current = nextRoundCue;
@@ -1071,7 +1074,10 @@ const UnifiedPostureAnalyzer: React.FC<UnifiedPostureAnalyzerProps> = ({
             return;
           }
 
-          const nextRoundCue = `本次完成，還有${remainingTotal}次`;
+          const totalRemaining =
+            (configuredKegelSets - currentKegelSet.current) * configuredKegelReps +
+            (configuredKegelReps - roundsInCurrentSet.current);
+          const nextRoundCue = `本次完成，還有${totalRemaining}次`;
           speakText(nextRoundCue);
           lastSpeechTime.current = now;
           lastSpokenFeedback.current = nextRoundCue;
