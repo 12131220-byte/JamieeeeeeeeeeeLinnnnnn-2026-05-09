@@ -836,7 +836,7 @@ const UnifiedPostureAnalyzer: React.FC<UnifiedPostureAnalyzerProps> = ({
           now >= tiptoeCountdownNextTickAt.current
         ) {
           const seconds = tiptoeCountdownRemaining.current;
-          speakText(seconds.toString());
+          speakText(String(seconds));
           lastSpeechTime.current = now;
           lastSpokenFeedback.current = seconds.toString();
           tiptoeCountdownRemaining.current -= 1;
@@ -902,7 +902,7 @@ const UnifiedPostureAnalyzer: React.FC<UnifiedPostureAnalyzerProps> = ({
                     if (next <= 10 && next > 0) {
                       // 避免打斷其他正在播放的語音
                       if (!isSpeaking.current) {
-                        speakText(next.toString());
+                        speakText(String(next));
                       }
                     }
                     return next;
@@ -988,7 +988,7 @@ const UnifiedPostureAnalyzer: React.FC<UnifiedPostureAnalyzerProps> = ({
           now >= legCountdownNextTickAt.current
         ) {
           const seconds = legCountdownRemaining.current;
-          speakText(seconds.toString());
+          speakText(String(seconds));
           lastSpeechTime.current = now;
           lastSpokenFeedback.current = seconds.toString();
           legCountdownRemaining.current -= 1;
@@ -1047,7 +1047,7 @@ const UnifiedPostureAnalyzer: React.FC<UnifiedPostureAnalyzerProps> = ({
                     }
                     if (next <= 10 && next > 0) {
                       if (!isSpeaking.current) {
-                        speakText(next.toString());
+                        speakText(String(next));
                       }
                     }
                     return next;
@@ -1269,20 +1269,25 @@ const styles = StyleSheet.create({
   },
   restOverlay: {
     backgroundColor: "rgba(0,0,0,0.75)",
-    paddingVertical: 28,
-    paddingHorizontal: 36,
-    borderRadius: 16,
+    paddingVertical: 80,
+    paddingHorizontal: 100,
+    borderRadius: 24,
     alignItems: "center",
+    minWidth: 320,
+    minHeight: 320,
   },
   restOverlayText: {
-    fontSize: 72,
+    fontSize: 160,
     color: "#FFFFFF",
     fontWeight: "700",
-    marginBottom: 6,
+    marginBottom: 24,
+    width: 220,
+    textAlign: "center",
   },
   restOverlayHint: {
-    fontSize: 16,
+    fontSize: 36,
     color: "#E5E7EB",
+    fontWeight: "600",
   },
   errorText: {
     fontSize: 13,
